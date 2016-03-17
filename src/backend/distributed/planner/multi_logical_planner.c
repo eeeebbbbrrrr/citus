@@ -1169,7 +1169,7 @@ MultiSelectNode(List *whereClauseList)
 /*
  * IsSelectClause determines if the given node is a select clause according to
  * our criteria. Our criteria defines a select clause as an expression that has
- * columns belonging to only one table.
+ * zero or more columns belonging to only one table.
  */
 static bool
 IsSelectClause(Node *clause)
@@ -1179,20 +1179,17 @@ IsSelectClause(Node *clause)
 	Var *firstColumn = NULL;
 	Index firstColumnTableId = 0;
 	bool isSelectClause = true;
+	NodeTag nodeTag PG_USED_FOR_ASSERTS_ONLY = nodeTag(clause);
 
-	/* we currently consider the following nodes as select clauses */
-	NodeTag nodeTag = nodeTag(clause);
-	if (!(nodeTag == T_OpExpr || nodeTag == T_ScalarArrayOpExpr ||
-		  nodeTag == T_NullTest || nodeTag == T_BooleanTest))
-	{
-		return false;
-	}
+	/* planner already errored out for subqueries in WHERE clause */
+	Assert(nodeTag != T_SubLink);
+	Assert(nodeTag != T_SubPlan);
 
 	/* extract columns from the clause */
 	columnList = pull_var_clause_default(clause);
 	if (list_length(columnList) == 0)
 	{
-		return false;
+		return true;
 	}
 
 	/* get first column's tableId */
