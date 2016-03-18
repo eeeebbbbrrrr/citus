@@ -178,8 +178,6 @@ DEBUG:  predicate pruning for shardId 111
 -- Check that we don't support pruning for ANY (array expression)
 EXPLAIN SELECT count(*) FROM orders_hash_partitioned
 	WHERE o_orderkey = 1 OR o_totalprice IN (2, 5);
-NOTICE:  cannot use shard pruning with ANY (array expression)
-HINT:  Consider rewriting the expression with OR clauses.
                               QUERY PLAN                              
 ----------------------------------------------------------------------
  explain statements for distributed queries are currently unsupported

@@ -2896,8 +2896,24 @@ HashableClauseMutator(Node *originalNode, Var *partitionColumn)
 	}
 	else if (IsA(originalNode, ScalarArrayOpExpr))
 	{
-		ereport(NOTICE, (errmsg("cannot use shard pruning with ANY (array expression)"),
-						 errhint("Consider rewriting the expression with OR clauses.")));
+		ScalarArrayOpExpr *arrayOperatorExpression = (ScalarArrayOpExpr *) originalNode;
+		Expr *leftOpExpression = linitial(arrayOperatorExpression->args);
+		Var *column = NULL;
+
+		if (IsA(leftOpExpression, Var))
+		{
+			column = (Var *) leftOpExpression;
+		}
+
+		/* shard pruning is not supported for ANY/ALL operations */
+		if ((column != NULL) && equal(column, partitionColumn))
+		{
+			ereport(NOTICE, (errmsg("cannot use shard pruning with ANY/ALL "
+									"(array expression)"),
+							 errhint("Consider rewriting ANY expression with "
+									 "OR operators and ALL expression with AND "
+									 "operators.")));
+		}
 	}
 
 	/*
