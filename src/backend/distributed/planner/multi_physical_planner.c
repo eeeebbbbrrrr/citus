@@ -2905,14 +2905,29 @@ HashableClauseMutator(Node *originalNode, Var *partitionColumn)
 			column = (Var *) leftOpExpression;
 		}
 
-		/* shard pruning is not supported for ANY/ALL operations */
+		/* 
+		 * Give a notice if the query column is the partition column because shard pruning
+		 * is not supported for ANY/ALL operations.  
+		 */
 		if ((column != NULL) && equal(column, partitionColumn))
 		{
-			ereport(NOTICE, (errmsg("cannot use shard pruning with ANY/ALL "
-									"(array expression)"),
-							 errhint("Consider rewriting ANY expression with "
-									 "OR operators and ALL expression with AND "
-									 "operators.")));
+			/* IN or ANY */
+			if (arrayOperatorExpression->useOr)
+			{
+				ereport(NOTICE, (errmsg("cannot use shard pruning with "
+										"ANY (array expression)"),
+								 errhint("Consider rewriting ANY expression with "
+										 "OR operators.")));
+			}
+			
+			/* ALL */
+			else
+			{
+				ereport(NOTICE, (errmsg("cannot use shard pruning with "
+										"ALL (array expression)"),
+								 errhint("Consider rewriting ALL expression with "
+										 "AND operators.")));
+			}
 		}
 	}
 
