@@ -2898,36 +2898,22 @@ HashableClauseMutator(Node *originalNode, Var *partitionColumn)
 	{
 		ScalarArrayOpExpr *arrayOperatorExpression = (ScalarArrayOpExpr *) originalNode;
 		Expr *leftOpExpression = linitial(arrayOperatorExpression->args);
-		Var *column = NULL;
+		Expr *strippedLeftOpExpression = strip_implicit_coercions(leftOpExpression);
+		char *operatorName = get_opname(arrayOperatorExpression->opno);
+		int equalsCompare = strncmp(operatorName, "=", NAMEDATALEN);
+		bool usingEqualityOperator = (equalsCompare == 0);
 
-		if (IsA(leftOpExpression, Var))
-		{
-			column = (Var *) leftOpExpression;
-		}
-
-		/* 
-		 * Give a notice if the query column is the partition column because shard pruning
-		 * is not supported for ANY/ALL operations.  
+		/*
+		 * Citus cannot prune hash-distributed shards with ANY/ALL. We show a NOTICE
+		 * if the expression is ANY/ALL performed on the partition column with equality.
 		 */
-		if ((column != NULL) && equal(column, partitionColumn))
+		if (usingEqualityOperator && strippedLeftOpExpression != NULL &&
+			equal(strippedLeftOpExpression, partitionColumn))
 		{
-			/* IN or ANY */
-			if (arrayOperatorExpression->useOr)
-			{
-				ereport(NOTICE, (errmsg("cannot use shard pruning with "
-										"ANY (array expression)"),
-								 errhint("Consider rewriting ANY expression with "
-										 "OR operators.")));
-			}
-			
-			/* ALL */
-			else
-			{
-				ereport(NOTICE, (errmsg("cannot use shard pruning with "
-										"ALL (array expression)"),
-								 errhint("Consider rewriting ALL expression with "
-										 "AND operators.")));
-			}
+			ereport(NOTICE, (errmsg("cannot use shard pruning with "
+									"ANY/ALL (array expression)"),
+							 errhint("Consider rewriting the expression with "
+									 "OR/AND clauses.")));
 		}
 	}
 
