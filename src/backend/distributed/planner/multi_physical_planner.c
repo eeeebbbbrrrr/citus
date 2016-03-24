@@ -2897,10 +2897,10 @@ HashableClauseMutator(Node *originalNode, Var *partitionColumn)
 	else if (IsA(originalNode, ScalarArrayOpExpr))
 	{
 		ScalarArrayOpExpr *arrayOperatorExpression = (ScalarArrayOpExpr *) originalNode;
-		Expr *leftOpExpression = linitial(arrayOperatorExpression->args);
-		Expr *strippedLeftOpExpression = strip_implicit_coercions(leftOpExpression);
+		Node *leftOpExpression = linitial(arrayOperatorExpression->args);
+		Node *strippedLeftOpExpression = strip_implicit_coercions(leftOpExpression);
 		char *operatorName = get_opname(arrayOperatorExpression->opno);
-		int equalsCompare = strncmp(operatorName, "=", NAMEDATALEN);
+		int equalsCompare = strncmp(operatorName, EQUAL_OPERATOR_STRING, NAMEDATALEN);
 		bool usingEqualityOperator = (equalsCompare == 0);
 
 		/*

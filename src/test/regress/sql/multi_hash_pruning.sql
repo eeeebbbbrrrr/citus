@@ -104,7 +104,7 @@ EXPLAIN SELECT count(*) FROM orders_hash_partitioned
 -- Check that we don't give a spurious hint message when non-partition 
 -- columns are used with ANY/IN/ALL
 EXPLAIN SELECT count(*) FROM orders_hash_partitioned
-	WHERE o_totalprice IN (2, 5);
+	WHERE o_orderkey = 1 OR o_totalprice IN (2, 5);
 
 -- Check that we cannot prune for mutable functions.
 
