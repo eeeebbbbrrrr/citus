@@ -159,6 +159,7 @@ worker_merge_files_and_run_query(PG_FUNCTION_ARGS)
 	}
 
 	appendStringInfo(setSearchPathString, SET_SEARCH_PATH_COMMAND, jobSchemaName->data);
+	appendStringInfo(setSearchPathString, ",public");
 
 	connected = SPI_connect();
 	if (connected != SPI_OK_CONNECT)

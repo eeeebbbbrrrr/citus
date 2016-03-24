@@ -52,3 +52,21 @@ SELECT count(*) FROM lineitem JOIN orders ON l_orderkey = o_orderkey
 -- Check that we make sure local joins are between columns only.
 
 SELECT count(*) FROM lineitem, orders WHERE l_orderkey + 1 = o_orderkey;
+
+-- Check that we can use UDFs when using repartitioned subqueries
+
+DROP FUNCTION IF EXISTS median(double precision[]);
+
+CREATE FUNCTION median(double precision[]) RETURNS double precision 
+LANGUAGE sql IMMUTABLE AS $_$ 
+	SELECT AVG(val) FROM 
+	  (SELECT val FROM unnest($1) val 
+	   ORDER BY 1 LIMIT  2 - MOD(array_upper($1, 1), 2) 
+	   OFFSET CEIL(array_upper($1, 1) / 2.0) - 1) sub; 
+$_$;
+
+EXPLAIN SELECT * FROM (
+    	SELECT
+      	  median(ARRAY[1,2,sum(l_suppkey)]) as median, count(*)
+    	  FROM lineitem GROUP BY l_partkey) AS a
+	WHERE median > 2;
