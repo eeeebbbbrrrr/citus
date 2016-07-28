@@ -43,6 +43,7 @@ typedef enum
 extern void RelayEventExtendNames(Node *parseTree, char *schemaName, uint64 shardId);
 extern void AppendShardIdToName(char **name, uint64 shardId);
 extern void AppendShardIdToStringInfo(StringInfo name, uint64 shardId);
+extern void AppendShardIdToRelationReferences(char *relationName, uint64 shardId, void **node);
 
 
 #endif   /* RELAY_UTILITY_H */

@@ -153,9 +153,10 @@ static StringInfo NodePortArrayString(List *workerNodeList);
 static StringInfo DatumArrayString(Datum *datumArray, uint32 datumCount, Oid datumTypeId);
 static Task * CreateBasicTask(uint64 jobId, uint32 taskId, TaskType taskType,
 							  char *queryString);
-static void UpdateRangeTableAlias(List *rangeTableList, List *fragmentList);
+static void UpdateRangeTableAlias(List *rangeTableList, List *fragmentList, Query *query);
 static Alias * FragmentAlias(RangeTblEntry *rangeTableEntry,
-							 RangeTableFragment *fragment);
+							 RangeTableFragment *fragment,
+							 char **fragmentRelationName, uint64 *assignedShardId);
 static uint64 AnchorShardId(List *fragmentList, uint32 anchorRangeTableId);
 static List * PruneSqlTaskDependencies(List *sqlTaskList);
 static List * AssignTaskList(List *sqlTaskList);
@@ -2068,7 +2069,7 @@ SubquerySqlTaskList(Job *job)
 		taskIdIndex += dataFetchTaskCount;
 
 		ExtractRangeTableRelationWalker((Node *) taskQuery, &taskRangeTableList);
-		UpdateRangeTableAlias(taskRangeTableList, fragmentCombination);
+		UpdateRangeTableAlias(taskRangeTableList, fragmentCombination, taskQuery);
 
 		/* transform the updated task query to a SQL query string */
 		sqlQueryString = makeStringInfo();
@@ -2184,7 +2185,8 @@ SqlTaskList(Job *job)
 		/* update range table entries with fragment aliases (in place) */
 		taskQuery = copyObject(jobQuery);
 		fragmentRangeTableList = taskQuery->rtable;
-		UpdateRangeTableAlias(fragmentRangeTableList, fragmentCombination);
+		UpdateRangeTableAlias(fragmentRangeTableList, fragmentCombination, taskQuery);
+        elog(LOG, "TASKQUERY: %s", nodeToString(taskQuery));
 
 		/* transform the updated task query to a SQL query string */
 		sqlQueryString = makeStringInfo();
@@ -3910,7 +3912,7 @@ CreateBasicTask(uint64 jobId, uint32 taskId, TaskType taskType, char *queryStrin
  * this alias.
  */
 static void
-UpdateRangeTableAlias(List *rangeTableList, List *fragmentList)
+UpdateRangeTableAlias(List *rangeTableList, List *fragmentList, Query *query)
 {
 	ListCell *fragmentCell = NULL;
 	foreach(fragmentCell, fragmentList)
@@ -3918,9 +3920,17 @@ UpdateRangeTableAlias(List *rangeTableList, List *fragmentList)
 		RangeTableFragment *fragment = (RangeTableFragment *) lfirst(fragmentCell);
 		Index rangeTableId = fragment->rangeTableId;
 		RangeTblEntry *rangeTableEntry = rt_fetch(rangeTableId, rangeTableList);
+		uint64 shardId;
+		char *relationName;
 
-		Alias *fragmentAlias = FragmentAlias(rangeTableEntry, fragment);
+		Alias *fragmentAlias = FragmentAlias(rangeTableEntry, fragment, &relationName, &shardId);
 		rangeTableEntry->alias = fragmentAlias;
+
+		if (relationName != NULL)
+		{
+			Assert(shardId != 0);
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &query);
+		}
 	}
 }
 
@@ -3931,7 +3941,7 @@ UpdateRangeTableAlias(List *rangeTableList, List *fragmentList)
  * a merge task.
  */
 static Alias *
-FragmentAlias(RangeTblEntry *rangeTableEntry, RangeTableFragment *fragment)
+FragmentAlias(RangeTblEntry *rangeTableEntry, RangeTableFragment *fragment, char **fragmentRelationName, uint64 *assignedShardId)
 {
 	Alias *alias = NULL;
 	char *aliasName = NULL;
@@ -3939,6 +3949,9 @@ FragmentAlias(RangeTblEntry *rangeTableEntry, RangeTableFragment *fragment)
 	char *fragmentName = NULL;
 
 	CitusRTEKind fragmentType = fragment->fragmentType;
+
+	*assignedShardId = 0;
+	*fragmentRelationName = NULL;
 	if (fragmentType == CITUS_RTE_RELATION)
 	{
 		char *shardAliasName = NULL;
@@ -3977,6 +3990,9 @@ FragmentAlias(RangeTblEntry *rangeTableEntry, RangeTableFragment *fragment)
 
 			fragmentName = shardName;
 		}
+
+		*assignedShardId = shardId;
+		*fragmentRelationName = pstrdup(relationName);
 	}
 	else if (fragmentType == CITUS_RTE_REMOTE_QUERY)
 	{

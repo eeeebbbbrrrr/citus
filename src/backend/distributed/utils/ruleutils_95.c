@@ -413,6 +413,7 @@ static char *generate_operator_name(Oid operid, Oid arg1, Oid arg2);
 void
 pg_get_query_def(Query *query, StringInfo buffer)
 {
+	elog(LOG, "pg_get_query_def");
 	get_query_def(query, buffer, NIL, NULL, 0, WRAP_COLUMN_DEFAULT, 0);
 }
 
@@ -1877,7 +1878,7 @@ get_query_def_extended(Query *query, StringInfo buf, List *parentnamespace,
 	context.special_exprkind = EXPR_KIND_NONE;
 	context.distrelid = distrelid;
 	context.shardid = shardid;
-
+elog(LOG, "get_query_def_extended shardid=%ld", shardid);
 	set_deparse_for_query(&dpns, query, parentnamespace);
 
 	switch (query->commandType)
@@ -3624,7 +3625,7 @@ get_variable(Var *var, int levelsup, bool istoplevel, deparse_context *context)
 	else
 	{
 		/* System column - name is fixed, get it from the catalog */
-		attname = get_rte_attribute_name(rte, attnum);
+		attname = get_relid_attribute_name(rte->relid, attnum);
 	}
 
 	if (refname && (context->varprefix || attname == NULL))
@@ -6039,6 +6040,16 @@ get_const_expr(Const *constval, deparse_context *context, int showtype)
 			else
 				appendStringInfoString(buf, "false");
 			break;
+
+		case REGCLASSOID:
+		{
+			char *relname = generate_relation_or_shard_name(DatumGetObjectId(constval->constvalue),
+											context->distrelid,
+											context->shardid,
+											context->namespaces);
+			simple_quote_literal(buf, relname);
+			break;
+		}
 
 		default:
 			simple_quote_literal(buf, extval);

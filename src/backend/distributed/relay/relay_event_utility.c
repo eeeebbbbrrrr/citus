@@ -22,12 +22,16 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_constraint.h"
+#include "catalog/pg_type.h"
 #include "commands/defrem.h"
+#include "distributed/metadata_cache.h"
 #include "distributed/relay_utility.h"
+#include "nodes/makefuncs.h"
 #include "nodes/parsenodes.h"
 #include "parser/parse_utilcmd.h"
 #include "storage/lock.h"
 #include "tcop/utility.h"
+#include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/tqual.h"
@@ -39,6 +43,7 @@ static bool TypeDropIndexConstraint(const AlterTableCmd *command,
 									const RangeVar *relation, uint64 shardId);
 static void AppendShardIdToConstraintName(AlterTableCmd *command, uint64 shardId);
 static void SetSchemaNameIfNotExist(char **schemaName, char *newSchemaName);
+// static void AppendShardIdToRelationReferences(char *relationName, uint64 shardId, Node *node);
 
 
 /*
@@ -332,6 +337,11 @@ RelayEventExtendNames(Node *parseTree, char *schemaName, uint64 shardId)
 			/* prefix with schema name if it is not added already */
 			SetSchemaNameIfNotExist(relationSchemaName, schemaName);
 
+			/*
+			 * we append the shardId to relation references in the indexParams first
+			 * because we need un-altered relationName in which to compare against
+			 */
+			AppendShardIdToRelationReferences(*relationName, shardId, (void **) &indexStmt->indexParams);
 			AppendShardIdToName(relationName, shardId);
 			AppendShardIdToName(indexName, shardId);
 			break;
@@ -606,4 +616,163 @@ void
 AppendShardIdToStringInfo(StringInfo name, uint64 shardId)
 {
 	appendStringInfo(name, "%c" UINT64_FORMAT, SHARD_NAME_SEPARATOR, shardId);
+}
+
+void
+AppendShardIdToRelationReferences(char *relationName, uint64 shardId, void **incomingNode)
+{
+    Node *node = (Node *) *incomingNode;
+
+	if (node == NULL)
+		return;
+
+	switch(nodeTag(node))
+	{
+		case T_Query:
+		{
+			Query *query = (Query *) node;
+
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &query->jointree);
+			break;
+		}
+
+		case T_FromExpr:
+		{
+			FromExpr *fromExpr = (FromExpr *) node;
+
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &fromExpr->fromlist);
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &fromExpr->quals);
+			break;
+		}
+
+        case T_OpExpr:
+        {
+            OpExpr *opExpr = (OpExpr *) node;
+
+            AppendShardIdToRelationReferences(relationName, shardId, (void **) &opExpr->args);
+            break;
+        }
+
+        case T_FuncExpr:
+        {
+            FuncExpr *funcExpr = (FuncExpr *) node;
+
+            AppendShardIdToRelationReferences(relationName, shardId, (void **) &funcExpr->args);
+            break;
+        }
+
+		case T_TargetEntry:
+		{
+			TargetEntry *te = (TargetEntry *) node;
+
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &te->expr);
+			break;
+		}
+
+		case T_List:
+		{
+			List *nodes = (List *) node;
+			ListCell *lc;
+
+			foreach (lc, nodes)
+			{
+				AppendShardIdToRelationReferences(relationName, shardId, &lfirst(lc));
+			}
+			break;
+		}
+
+		case T_FuncCall:
+		{
+			FuncCall *funcCall = (FuncCall *) node;
+
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &funcCall->args);
+			break;
+		}
+
+		case T_IndexElem:
+		{
+			IndexElem *elem = (IndexElem *) node;
+
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &elem->expr);
+			break;
+		}
+
+		case T_ColumnRef:
+		{
+			ColumnRef *colRef = (ColumnRef *) node;
+
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &colRef->fields);
+			break;
+		}
+
+		case T_A_Const:
+		{
+			A_Const *aConst = (A_Const *) node;
+            Value *value = &aConst->val;
+
+			AppendShardIdToRelationReferences(relationName, shardId, (void **) &value);
+			break;
+		}
+
+		case T_Const:
+		{
+			Const *cnst = (Const *) node;
+
+			if (!cnst->constisnull)
+			{
+				switch (cnst->consttype)
+				{
+					case OIDOID:
+					case REGCLASSOID:
+					{
+						Oid relid = DatumGetObjectId(cnst->constvalue);
+						if (IsDistributedTable(relid) && strncmp(get_rel_name(relid), relationName, NAMEDATALEN) == 0)
+                        {
+                            CoerceViaIO *cast = makeNode(CoerceViaIO);
+							char *relnameWithShard = pstrdup(relationName);
+
+							AppendShardIdToName(&relnameWithShard, shardId);
+
+							cnst = makeNode(Const);
+                            cnst->constvalue = PointerGetDatum(cstring_to_text(relnameWithShard));
+                            cnst->consttype = TEXTOID;
+                            cnst->constbyval = false;
+							cnst->constlen = -2;
+							cnst->constisnull = false;
+							cnst->consttypmod = -1;
+
+                            cast->arg = (Expr *) cnst;
+                            cast->resulttype = REGCLASSOID;
+                            cast->coerceformat = COERCE_EXPLICIT_CAST;
+                            cast->resultcollid = InvalidOid;
+                            cast->location = cnst->location;
+
+                            *incomingNode = cast;
+						}
+						break;
+					}
+
+					default:
+						/* we don't care about other types */
+						break;
+				}
+			}
+			break;
+		}
+
+		case T_String:
+		{
+			Value *value = (Value *) node;
+			char *str = strVal(value);
+
+			if (strncmp(str, relationName, NAMEDATALEN) == 0)
+			{
+				AppendShardIdToName(&str, shardId);
+				value->val.str = str;
+			}
+		}
+
+		default:
+			break;
+	}
 }
