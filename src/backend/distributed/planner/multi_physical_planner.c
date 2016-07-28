@@ -2186,7 +2186,6 @@ SqlTaskList(Job *job)
 		taskQuery = copyObject(jobQuery);
 		fragmentRangeTableList = taskQuery->rtable;
 		UpdateRangeTableAlias(fragmentRangeTableList, fragmentCombination, taskQuery);
-        elog(LOG, "TASKQUERY: %s", nodeToString(taskQuery));
 
 		/* transform the updated task query to a SQL query string */
 		sqlQueryString = makeStringInfo();

@@ -413,7 +413,6 @@ static char *generate_operator_name(Oid operid, Oid arg1, Oid arg2);
 void
 pg_get_query_def(Query *query, StringInfo buffer)
 {
-	elog(LOG, "pg_get_query_def");
 	get_query_def(query, buffer, NIL, NULL, 0, WRAP_COLUMN_DEFAULT, 0);
 }
 
@@ -1878,7 +1877,7 @@ get_query_def_extended(Query *query, StringInfo buf, List *parentnamespace,
 	context.special_exprkind = EXPR_KIND_NONE;
 	context.distrelid = distrelid;
 	context.shardid = shardid;
-elog(LOG, "get_query_def_extended shardid=%ld", shardid);
+
 	set_deparse_for_query(&dpns, query, parentnamespace);
 
 	switch (query->commandType)
